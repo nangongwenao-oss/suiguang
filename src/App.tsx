@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -15,10 +15,14 @@ import {
   Archive,
   Clock,
   ChevronRight,
-  Trash2
+  Trash2,
+  Download,
+  FileText
 } from 'lucide-react';
 import { AgentRole, Message, KnowledgeCapsule, RefereeReport, SalonState, SavedCapsule } from './types';
 import { generateAgentResponse, generateCapsule, evaluateCapsule } from './services/geminiService';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 const AGENT_ICONS: Record<AgentRole, any> = {
   Host: Cpu,
@@ -159,7 +163,7 @@ export default function App() {
     }
   };
 
-  const deleteCapsule = (id: string, e: React.MouseEvent) => {
+  const deleteCapsule = (id: string, e: MouseEvent) => {
     e.stopPropagation();
     setState(prev => ({
       ...prev,
@@ -428,100 +432,214 @@ export default function App() {
 }
 
 function CapsuleDisplay({ capsule, report }: { capsule: KnowledgeCapsule, report?: RefereeReport }) {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="glass-panel rounded-2xl overflow-hidden capsule-glow border-warm-orange/20"
-    >
-      <div className="bg-gradient-to-r from-warm-orange to-goose-yellow p-6 text-white">
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center gap-2 px-2 py-1 bg-white/20 rounded text-[10px] font-bold uppercase tracking-widest">
-            <Sparkles size={12} />
-            KNOWLEDGE CAPSULE
-          </div>
-          <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold">
-            等级：{capsule.level}
-          </div>
-        </div>
-        <h2 className="text-2xl font-bold mb-2">{capsule.title}</h2>
-        <p className="text-white/90 text-sm italic">核心问题：{capsule.coreQuestion}</p>
-      </div>
+  const capsuleRef = useRef<HTMLDivElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const downloadPDF = async () => {
+    if (!capsuleRef.current) return;
+    setIsDownloading(true);
+
+    try {
+      // Use a higher scale for better print quality
+      const canvas = await html2canvas(capsuleRef.current, {
+        scale: 3, 
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        allowTaint: true,
+        onclone: (clonedDoc) => {
+          // You can modify the cloned document here if needed
+          const el = clonedDoc.getElementById('poster-footer');
+          if (el) el.style.display = 'flex';
+        }
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: [canvas.width / 3, canvas.height / 3],
+      });
+
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width / 3, canvas.height / 3);
+      pdf.save(`${capsule.title.replace(/\s+/g, '_')}_Poster.pdf`);
       
-      <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8 bg-white/50">
-        <div className="space-y-6">
-          <section>
-            <h3 className="text-xs font-bold text-sky-blue uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Microscope size={14} /> 关键原理
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed">{capsule.keyPrinciples}</p>
-          </section>
-          <section>
-            <h3 className="text-xs font-bold text-warm-orange uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Lightbulb size={14} /> 创新方法
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed">{capsule.innovationMethods}</p>
-          </section>
-        </div>
-        <div className="space-y-6">
-          <section>
-            <h3 className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Cpu size={14} /> 应用场景
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed">{capsule.applicationScenarios}</p>
-          </section>
-          <section>
-            <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Zap size={14} /> 未来潜力
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed">{capsule.futurePotential}</p>
-          </section>
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (error) {
+      console.error('PDF Download Error:', error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 relative">
+      <div className="flex justify-between items-center">
+        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+          <FileText size={16} />
+          沉淀结果：知识胶囊
+        </h3>
+        <div className="flex items-center gap-3">
+          <AnimatePresence>
+            {showSuccess && (
+              <motion.span 
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-xs text-emerald-500 font-medium flex items-center gap-1"
+              >
+                <ShieldCheck size={14} />
+                下载成功！
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <button 
+            onClick={downloadPDF}
+            disabled={isDownloading}
+            className="flex items-center gap-2 px-4 py-2 bg-warm-orange text-white rounded-xl text-sm font-medium hover:bg-warm-orange/90 transition-all shadow-lg shadow-warm-orange/20 disabled:opacity-50"
+          >
+            {isDownloading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Download size={16} />
+            )}
+            <span>{isDownloading ? '正在生成海报...' : '下载 PDF 海报'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Referee Report */}
-      {report && (
-        <div className="p-8 border-t border-slate-100 bg-slate-50/50">
-          <div className="flex items-center gap-2 mb-6">
-            <Award size={20} className="text-rose-500" />
-            <h3 className="text-lg font-semibold text-slate-800">裁判员评估报告</h3>
-          </div>
+      <motion.div 
+        ref={capsuleRef}
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 relative"
+        style={{ minWidth: '600px' }} // Ensure a minimum width for the poster layout
+      >
+        {/* Poster Header Decoration */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-warm-orange via-goose-yellow to-sky-blue"></div>
+        
+        <div className="bg-gradient-to-br from-warm-orange to-goose-yellow p-10 text-white relative overflow-hidden">
+          {/* Decorative background elements */}
+          <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+          <div className="absolute -left-10 -bottom-10 w-60 h-60 bg-sky-blue/20 rounded-full blur-3xl"></div>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            {[
-              { label: '真 (Truth)', score: report.truth, color: 'text-emerald-600' },
-              { label: '善 (Goodness)', score: report.goodness, color: 'text-sky-blue' },
-              { label: '美 (Beauty)', score: report.beauty, color: 'text-indigo-600' },
-              { label: '灵 (Spirit)', score: report.spirit, color: 'text-warm-orange' },
-            ].map(stat => (
-              <div key={stat.label} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">{stat.label}</div>
-                <div className={`text-2xl font-bold ${stat.color}`}>{stat.score}<span className="text-xs text-slate-300">/10</span></div>
+          <div className="relative z-10">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-[0.2em] border border-white/30">
+                <Sparkles size={14} />
+                Knowledge Capsule Poster
               </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-center p-6 bg-white rounded-2xl border border-slate-100 gap-6 shadow-sm">
-            <div className="text-center md:text-left">
-              <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">总分评估</div>
-              <div className="text-4xl font-bold text-slate-800">{report.totalScore}<span className="text-sm text-slate-300"> / 40</span></div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">知识等级</div>
-              <div className="px-4 py-1 bg-rose-500 text-white rounded-full text-sm font-bold shadow-lg shadow-rose-500/20">
-                {report.level}
+              <div className="px-4 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold border border-white/30">
+                Level: {capsule.level}
               </div>
             </div>
-            <div className="text-center md:text-right">
-              <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">TOKEN 价值</div>
-              <div className="text-3xl font-bold text-amber-500 flex items-center justify-center md:justify-end gap-2">
-                <Zap size={24} />
-                {report.tokenValue}
-              </div>
-            </div>
+            <h2 className="text-4xl font-bold mb-4 tracking-tight leading-tight">{capsule.title}</h2>
+            <div className="h-1 w-20 bg-white/50 rounded-full mb-4"></div>
+            <p className="text-white/90 text-lg font-medium italic max-w-2xl">
+              <span className="opacity-60 not-italic mr-2">Core Question:</span>
+              {capsule.coreQuestion}
+            </p>
           </div>
         </div>
-      )}
-    </motion.div>
+        
+        <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-10 bg-white">
+          <div className="space-y-8">
+            <section className="relative">
+              <div className="absolute -left-4 top-0 w-1 h-full bg-sky-blue/30 rounded-full"></div>
+              <h3 className="text-xs font-bold text-sky-blue uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <Microscope size={16} /> 关键原理 / Principles
+              </h3>
+              <p className="text-base text-slate-700 leading-relaxed font-medium">{capsule.keyPrinciples}</p>
+            </section>
+            <section className="relative">
+              <div className="absolute -left-4 top-0 w-1 h-full bg-warm-orange/30 rounded-full"></div>
+              <h3 className="text-xs font-bold text-warm-orange uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <Lightbulb size={16} /> 创新方法 / Innovation
+              </h3>
+              <p className="text-base text-slate-700 leading-relaxed font-medium">{capsule.innovationMethods}</p>
+            </section>
+          </div>
+          <div className="space-y-8">
+            <section className="relative">
+              <div className="absolute -left-4 top-0 w-1 h-full bg-emerald-500/30 rounded-full"></div>
+              <h3 className="text-xs font-bold text-emerald-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <Cpu size={16} /> 应用场景 / Scenarios
+              </h3>
+              <p className="text-base text-slate-700 leading-relaxed font-medium">{capsule.applicationScenarios}</p>
+            </section>
+            <section className="relative">
+              <div className="absolute -left-4 top-0 w-1 h-full bg-indigo-500/30 rounded-full"></div>
+              <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <Zap size={16} /> 未来潜力 / Potential
+              </h3>
+              <p className="text-base text-slate-700 leading-relaxed font-medium">{capsule.futurePotential}</p>
+            </section>
+          </div>
+        </div>
+
+        {/* Referee Report Section in Poster */}
+        {report && (
+          <div className="mx-10 mb-10 p-8 rounded-2xl bg-slate-50 border border-slate-100">
+            <div className="flex items-center gap-2 mb-6">
+              <Award size={24} className="text-rose-500" />
+              <h3 className="text-xl font-bold text-slate-800">裁判员评估报告 / Evaluation</h3>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+              {[
+                { label: '真 (Truth)', score: report.truth, color: 'text-emerald-600' },
+                { label: '善 (Goodness)', score: report.goodness, color: 'text-sky-blue' },
+                { label: '美 (Beauty)', score: report.beauty, color: 'text-indigo-600' },
+                { label: '灵 (Spirit)', score: report.spirit, color: 'text-warm-orange' },
+              ].map(stat => (
+                <div key={stat.label} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
+                  <div className="text-[10px] text-slate-400 uppercase tracking-widest mb-2">{stat.label}</div>
+                  <div className={`text-3xl font-black ${stat.color}`}>{stat.score}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col md:flex-row justify-between items-center p-6 bg-white rounded-2xl border border-slate-100 gap-6 shadow-sm">
+              <div className="text-center md:text-left">
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">总分评估 / Total</div>
+                <div className="text-4xl font-black text-slate-800">{report.totalScore}<span className="text-sm text-slate-300 font-normal"> / 40</span></div>
+              </div>
+              <div className="text-center">
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">知识等级 / Grade</div>
+                <div className="px-6 py-2 bg-rose-500 text-white rounded-full text-base font-black shadow-lg shadow-rose-500/20">
+                  {report.level}
+                </div>
+              </div>
+              <div className="text-center md:text-right">
+                <div className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">TOKEN 价值 / Value</div>
+                <div className="text-4xl font-black text-amber-500 flex items-center justify-center md:justify-end gap-2">
+                  <Zap size={28} />
+                  {report.tokenValue}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Poster Footer (Visible in PDF) */}
+        <div id="poster-footer" className="p-8 bg-slate-900 text-white hidden justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-warm-orange flex items-center justify-center">
+              <Cpu size={24} />
+            </div>
+            <div>
+              <div className="text-sm font-bold tracking-widest">SUÌ GUĀNG MASKnowledge Salon</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-widest">AI-Driven Knowledge Asset System</div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Generated On</div>
+            <div className="text-xs font-mono">{new Date().toLocaleString()}</div>
+          </div>
+        </div>
+      </motion.div>
+    </div>
   );
 }
