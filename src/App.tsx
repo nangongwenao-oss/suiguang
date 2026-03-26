@@ -21,8 +21,8 @@ import {
 } from 'lucide-react';
 import { AgentRole, Message, KnowledgeCapsule, RefereeReport, SalonState, SavedCapsule } from './types';
 import { generateAgentResponse, generateCapsule, evaluateCapsule } from './services/geminiService';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import * as htmlToImage from 'html-to-image';
 
 const AGENT_ICONS: Record<AgentRole, any> = {
   Host: Cpu,
@@ -441,34 +441,127 @@ function CapsuleDisplay({ capsule, report }: { capsule: KnowledgeCapsule, report
     setIsDownloading(true);
 
     try {
-      // Use a higher scale for better print quality
-      const canvas = await html2canvas(capsuleRef.current, {
-        scale: 3, 
-        useCORS: true,
+      console.log('Starting PDF generation with html-to-image...');
+      
+      const element = capsuleRef.current;
+      
+      // Temporarily show the footer for capture
+      const footer = element.querySelector('.poster-footer') as HTMLElement;
+      if (footer) {
+        footer.style.display = 'flex';
+        footer.style.visibility = 'visible';
+        footer.style.opacity = '1';
+      }
+
+      // Wait for fonts and a small delay for layout stabilization
+      if (document.fonts) {
+        await document.fonts.ready;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Use htmlToImage with high pixel ratio for quality
+      const dataUrl = await htmlToImage.toJpeg(element, {
+        quality: 0.95,
         backgroundColor: '#ffffff',
-        logging: false,
-        allowTaint: true,
-        onclone: (clonedDoc) => {
-          // You can modify the cloned document here if needed
-          const el = clonedDoc.getElementById('poster-footer');
-          if (el) el.style.display = 'flex';
+        width: 800,
+        pixelRatio: 2, // Higher quality
+        style: {
+          transform: 'none',
+          animation: 'none',
+          transition: 'none',
+          borderRadius: '0',
+          filter: 'none',
         }
       });
 
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'px',
-        format: [canvas.width / 3, canvas.height / 3],
+      // Reset footer visibility
+      if (footer) {
+        footer.style.display = 'none';
+      }
+
+      const img = new Image();
+      img.src = dataUrl;
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = (e) => {
+          console.error('Image load error:', e);
+          reject(new Error('Failed to load captured image'));
+        };
       });
 
-      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width / 3, canvas.height / 3);
-      pdf.save(`${capsule.title.replace(/\s+/g, '_')}_Poster.pdf`);
+      const pdfWidth = img.width;
+      const pdfHeight = img.height;
+
+      const pdf = new jsPDF({
+        orientation: pdfWidth > pdfHeight ? 'l' : 'p',
+        unit: 'px',
+        format: [pdfWidth, pdfHeight],
+      });
+
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      const fileName = (capsule.title || 'Knowledge_Capsule').replace(/[^\w\s]/gi, '').replace(/\s+/g, '_');
+      pdf.save(`${fileName}_Poster.pdf`);
+      
+      console.log('PDF saved successfully');
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (error) {
+      console.error('Detailed PDF Download Error:', error);
+      alert('PDF 生成失败，尝试下载为图片格式...');
+      await downloadImage();
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const downloadImage = async () => {
+    if (!capsuleRef.current) return;
+    setIsDownloading(true);
+
+    try {
+      console.log('Starting PNG generation with html-to-image...');
+      const element = capsuleRef.current;
+      
+      const footer = element.querySelector('.poster-footer') as HTMLElement;
+      if (footer) {
+        footer.style.display = 'flex';
+        footer.style.visibility = 'visible';
+        footer.style.opacity = '1';
+      }
+
+      if (document.fonts) {
+        await document.fonts.ready;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const dataUrl = await htmlToImage.toPng(element, {
+        backgroundColor: '#ffffff',
+        width: 800,
+        pixelRatio: 2,
+        style: {
+          transform: 'none',
+          animation: 'none',
+          transition: 'none',
+          filter: 'none',
+        }
+      });
+
+      if (footer) {
+        footer.style.display = 'none';
+      }
+
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      const fileName = (capsule.title || 'Knowledge_Capsule').replace(/[^\w\s]/gi, '').replace(/\s+/g, '_');
+      link.download = `${fileName}_Poster.png`;
+      link.click();
       
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
-      console.error('PDF Download Error:', error);
+      console.error('Image Download Error:', error);
+      alert('图片生成也失败了，请检查浏览器权限或尝试刷新页面。');
     } finally {
       setIsDownloading(false);
     }
@@ -505,7 +598,15 @@ function CapsuleDisplay({ capsule, report }: { capsule: KnowledgeCapsule, report
             ) : (
               <Download size={16} />
             )}
-            <span>{isDownloading ? '正在生成海报...' : '下载 PDF 海报'}</span>
+            <span>{isDownloading ? '正在生成...' : '下载 PDF 海报'}</span>
+          </button>
+          <button 
+            onClick={downloadImage}
+            disabled={isDownloading}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+          >
+            <Download size={16} />
+            <span>下载图片</span>
           </button>
         </div>
       </div>
@@ -514,8 +615,8 @@ function CapsuleDisplay({ capsule, report }: { capsule: KnowledgeCapsule, report
         ref={capsuleRef}
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 relative"
-        style={{ minWidth: '600px' }} // Ensure a minimum width for the poster layout
+        className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 relative capsule-poster-container"
+        style={{ width: '800px', margin: '0 auto' }} // Fixed width for consistent poster layout
       >
         {/* Poster Header Decoration */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-warm-orange via-goose-yellow to-sky-blue"></div>
@@ -624,7 +725,7 @@ function CapsuleDisplay({ capsule, report }: { capsule: KnowledgeCapsule, report
         )}
 
         {/* Poster Footer (Visible in PDF) */}
-        <div id="poster-footer" className="p-8 bg-slate-900 text-white hidden justify-between items-center">
+        <div className="poster-footer p-8 bg-slate-900 text-white hidden justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-warm-orange flex items-center justify-center">
               <Cpu size={24} />
